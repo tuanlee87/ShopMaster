@@ -106,8 +106,8 @@ export function Dashboard() {
               Sao lưu
             </Button>
             <label className="cursor-pointer">
-              <Button variant="outline" size="sm" asChild className="bg-white">
-                <span>Khôi phục</span>
+              <Button variant="outline" size="sm" className="bg-white" render={<span />} nativeButton={false}>
+                Khôi phục
               </Button>
               <input type="file" className="hidden" accept=".json" onChange={handleRestore} />
             </label>

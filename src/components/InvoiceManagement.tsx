@@ -119,11 +119,9 @@ export function InvoiceManagement() {
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold tracking-tight text-gray-900">Quản lý hóa đơn</h2>
         <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-blue-600 hover:bg-blue-700 shadow-md">
-              <Plus className="w-4 h-4 mr-2" />
-              Tạo hóa đơn
-            </Button>
+          <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700 shadow-md" nativeButton={false} />}>
+            <Plus className="w-4 h-4 mr-2" />
+            Tạo hóa đơn
           </DialogTrigger>
           <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>

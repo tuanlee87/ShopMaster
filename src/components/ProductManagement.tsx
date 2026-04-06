@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, ChangeEvent } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,17 +11,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Package, Plus, Search, Edit2, Trash2, MoreVertical, Filter } from 'lucide-react';
+import { Package, Plus, Search, Edit2, Trash2, MoreVertical, Filter, ArrowUpDown, ArrowUp, ArrowDown, FileUp, FileDown } from 'lucide-react';
+import { utils, writeFile, read } from 'xlsx';
 import { storage } from '@/lib/storage';
 import { Product, Category } from '@/types';
 import { toast } from 'sonner';
 
 export function ProductManagement() {
   const [products, setProducts] = useState<Product[]>(storage.getProducts());
-  const [categories] = useState<Category[]>(storage.getCategories());
+  const [categories, setCategories] = useState<Category[]>(storage.getCategories());
   const [search, setSearch] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [sortField, setSortField] = useState<keyof Product | 'categoryName'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -32,12 +35,112 @@ export function ProductManagement() {
     description: '',
   });
 
+  const handleExportExcel = () => {
+    const exportData = products.map(p => ({
+      'Tên sản phẩm': p.name,
+      'Danh mục': categories.find(c => c.id === p.categoryId)?.name || 'N/A',
+      'Giá bán': p.price,
+      'Tồn kho': p.stock,
+      'Đơn vị': p.unit,
+      'Mô tả': p.description || ''
+    }));
+
+    const ws = utils.json_to_sheet(exportData);
+    const wb = utils.book_new();
+    utils.book_append_sheet(wb, ws, 'Products');
+    writeFile(wb, 'products_export.xlsx');
+    toast.success('Xuất file Excel thành công');
+  };
+
+  const handleImportExcel = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = event.target?.result;
+        const workbook = read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const jsonData = utils.sheet_to_json(sheet) as any[];
+
+        let importedCount = 0;
+        jsonData.forEach(row => {
+          const categoryName = row['Danh mục'];
+          let category = storage.getCategories().find(c => c.name.toLowerCase() === categoryName?.toString().toLowerCase());
+          
+          if (!category && categoryName) {
+            category = storage.addCategory({ name: categoryName.toString(), description: 'Imported from Excel' });
+          }
+
+          if (row['Tên sản phẩm']) {
+            storage.addProduct({
+              name: row['Tên sản phẩm'].toString(),
+              categoryId: category?.id || '',
+              price: Number(row['Giá bán']) || 0,
+              stock: Number(row['Tồn kho']) || 0,
+              unit: row['Đơn vị']?.toString() || 'Cái',
+              description: row['Mô tả']?.toString() || ''
+            });
+            importedCount++;
+          }
+        });
+
+        if (importedCount > 0) {
+          setProducts(storage.getProducts());
+          setCategories(storage.getCategories());
+          toast.success(`Đã nhập thành công ${importedCount} sản phẩm`);
+        } else {
+          toast.error('Không tìm thấy dữ liệu hợp lệ trong file');
+        }
+      } catch (error) {
+        console.error('Import error:', error);
+        toast.error('Có lỗi xảy ra khi đọc file Excel');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = ''; // Reset input
+  };
+
+  const handleSort = (field: keyof Product | 'categoryName') => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
   const filteredProducts = useMemo(() => {
-    return products.filter(p => 
+    const filtered = products.filter(p => 
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       categories.find(c => c.id === p.categoryId)?.name.toLowerCase().includes(search.toLowerCase())
     );
-  }, [products, search, categories]);
+
+    return [...filtered].sort((a, b) => {
+      let valA: any;
+      let valB: any;
+
+      if (sortField === 'categoryName') {
+        valA = categories.find(c => c.id === a.categoryId)?.name || '';
+        valB = categories.find(c => c.id === b.categoryId)?.name || '';
+      } else {
+        valA = a[sortField as keyof Product];
+        valB = b[sortField as keyof Product];
+      }
+
+      if (typeof valA === 'string') {
+        return sortOrder === 'asc' 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      } else {
+        return sortOrder === 'asc' 
+          ? (valA as number) - (valB as number) 
+          : (valB as number) - (valA as number);
+      }
+    });
+  }, [products, search, categories, sortField, sortOrder]);
 
   const handleAdd = () => {
     if (!formData.name || !formData.categoryId || formData.price <= 0) {
@@ -84,72 +187,88 @@ export function ProductManagement() {
     <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold tracking-tight text-gray-900">Quản lý sản phẩm</h2>
-        <Dialog open={isAddOpen || !!editingProduct} onOpenChange={(open) => {
-          if (!open) {
-            setIsAddOpen(false);
-            setEditingProduct(null);
-            setFormData({ name: '', categoryId: '', price: 0, stock: 0, unit: 'Cái', description: '' });
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button onClick={() => setIsAddOpen(true)} className="bg-blue-600 hover:bg-blue-700 shadow-md">
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExportExcel} className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+            <FileDown className="w-4 h-4 mr-2" />
+            Xuất Excel
+          </Button>
+          <div className="relative">
+            <input
+              type="file"
+              accept=".xlsx, .xls"
+              className="absolute inset-0 opacity-0 cursor-pointer"
+              onChange={handleImportExcel}
+            />
+            <Button variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50">
+              <FileUp className="w-4 h-4 mr-2" />
+              Nhập Excel
+            </Button>
+          </div>
+          <Dialog open={isAddOpen || !!editingProduct} onOpenChange={(open) => {
+            if (!open) {
+              setIsAddOpen(false);
+              setEditingProduct(null);
+              setFormData({ name: '', categoryId: '', price: 0, stock: 0, unit: 'Cái', description: '' });
+            }
+          }}>
+            <DialogTrigger render={<Button onClick={() => setIsAddOpen(true)} className="bg-blue-600 hover:bg-blue-700 shadow-md" nativeButton={false} />}>
               <Plus className="w-4 h-4 mr-2" />
               Thêm sản phẩm
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-bold">
-                {editingProduct ? 'Cập nhật sản phẩm' : 'Thêm sản phẩm mới'}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="grid gap-6 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="name">Tên sản phẩm</Label>
-                <Input id="name" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="VD: iPhone 15 Pro Max" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-bold">
+                  {editingProduct ? 'Cập nhật sản phẩm' : 'Thêm sản phẩm mới'}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-6 py-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="category">Danh mục</Label>
-                  <Select value={formData.categoryId} onValueChange={val => setFormData({ ...formData, categoryId: val })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn danh mục" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map(c => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="name">Tên sản phẩm</Label>
+                  <Input id="name" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="VD: iPhone 15 Pro Max" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="category">Danh mục</Label>
+                    <Select value={formData.categoryId} onValueChange={val => setFormData({ ...formData, categoryId: val })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chọn danh mục" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories.map(c => (
+                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="unit">Đơn vị tính</Label>
+                    <Input id="unit" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value })} placeholder="Cái, Bộ, Kg..." />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="price">Giá bán (VNĐ)</Label>
+                    <Input id="price" type="number" value={formData.price} onChange={e => setFormData({ ...formData, price: Number(e.target.value) })} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="stock">Tồn kho</Label>
+                    <Input id="stock" type="number" value={formData.stock} onChange={e => setFormData({ ...formData, stock: Number(e.target.value) })} />
+                  </div>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="unit">Đơn vị tính</Label>
-                  <Input id="unit" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value })} placeholder="Cái, Bộ, Kg..." />
+                  <Label htmlFor="description">Mô tả</Label>
+                  <Input id="description" value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Mô tả ngắn về sản phẩm" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="price">Giá bán (VNĐ)</Label>
-                  <Input id="price" type="number" value={formData.price} onChange={e => setFormData({ ...formData, price: Number(e.target.value) })} />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="stock">Tồn kho</Label>
-                  <Input id="stock" type="number" value={formData.stock} onChange={e => setFormData({ ...formData, stock: Number(e.target.value) })} />
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="description">Mô tả</Label>
-                <Input id="description" value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Mô tả ngắn về sản phẩm" />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => { setIsAddOpen(false); setEditingProduct(null); }}>Hủy</Button>
-              <Button onClick={editingProduct ? handleUpdate : handleAdd} className="bg-blue-600 hover:bg-blue-700">
-                {editingProduct ? 'Cập nhật' : 'Thêm mới'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setIsAddOpen(false); setEditingProduct(null); }}>Hủy</Button>
+                <Button onClick={editingProduct ? handleUpdate : handleAdd} className="bg-blue-600 hover:bg-blue-700">
+                  {editingProduct ? 'Cập nhật' : 'Thêm mới'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Card className="border-none shadow-md">
@@ -177,16 +296,51 @@ export function ProductManagement() {
             <Table>
               <TableHeader className="bg-gray-50">
                 <TableRow>
-                  <TableHead className="font-bold">Sản phẩm</TableHead>
-                  <TableHead className="font-bold">Danh mục</TableHead>
-                  <TableHead className="font-bold">Giá bán</TableHead>
-                  <TableHead className="font-bold">Tồn kho</TableHead>
+                  <TableHead className="font-bold cursor-pointer hover:text-blue-600 transition-colors" onClick={() => handleSort('name')}>
+                    <div className="flex items-center gap-1">
+                      Sản phẩm
+                      {sortField === 'name' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                    </div>
+                  </TableHead>
+                  <TableHead className="font-bold cursor-pointer hover:text-blue-600 transition-colors" onClick={() => handleSort('categoryName')}>
+                    <div className="flex items-center gap-1">
+                      Danh mục
+                      {sortField === 'categoryName' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                    </div>
+                  </TableHead>
+                  <TableHead className="font-bold cursor-pointer hover:text-blue-600 transition-colors" onClick={() => handleSort('price')}>
+                    <div className="flex items-center gap-1">
+                      Giá bán
+                      {sortField === 'price' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                    </div>
+                  </TableHead>
+                  <TableHead className="font-bold cursor-pointer hover:text-blue-600 transition-colors" onClick={() => handleSort('stock')}>
+                    <div className="flex items-center gap-1">
+                      Tồn kho
+                      {sortField === 'stock' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                    </div>
+                  </TableHead>
                   <TableHead className="font-bold text-right">Thao tác</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.map((product) => (
-                  <TableRow key={product.id} className="hover:bg-gray-50 transition-colors">
+                {filteredProducts.map((product, index) => (
+                  <TableRow 
+                    key={product.id} 
+                    className={`
+                      transition-colors duration-200
+                      ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}
+                      hover:bg-blue-50/50
+                    `}
+                  >
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600">

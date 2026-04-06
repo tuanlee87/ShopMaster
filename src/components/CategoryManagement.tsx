@@ -79,11 +79,9 @@ export function CategoryManagement() {
             setFormData({ name: '', description: '' });
           }
         }}>
-          <DialogTrigger asChild>
-            <Button onClick={() => setIsAddOpen(true)} className="bg-blue-600 hover:bg-blue-700 shadow-md">
-              <Plus className="w-4 h-4 mr-2" />
-              Thêm danh mục
-            </Button>
+          <DialogTrigger render={<Button onClick={() => setIsAddOpen(true)} className="bg-blue-600 hover:bg-blue-700 shadow-md" nativeButton={false} />}>
+            <Plus className="w-4 h-4 mr-2" />
+            Thêm danh mục
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>

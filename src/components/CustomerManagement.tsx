@@ -83,11 +83,9 @@ export function CustomerManagement() {
             setFormData({ name: '', phone: '', email: '', address: '' });
           }
         }}>
-          <DialogTrigger asChild>
-            <Button onClick={() => setIsAddOpen(true)} className="bg-blue-600 hover:bg-blue-700 shadow-md">
-              <Plus className="w-4 h-4 mr-2" />
-              Thêm khách hàng
-            </Button>
+          <DialogTrigger render={<Button onClick={() => setIsAddOpen(true)} className="bg-blue-600 hover:bg-blue-700 shadow-md" nativeButton={false} />}>
+            <Plus className="w-4 h-4 mr-2" />
+            Thêm khách hàng
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
